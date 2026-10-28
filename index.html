@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>도서관 대출 시스템</title>
+<!-- 대출 규칙은 이 페이지에 없습니다. 브라우저 안 파이썬(Pyodide)으로 solution.py의 LibraryLoan을 그대로 불러 씁니다. -->
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 0 auto; padding: 16px; background: #fafafa; color: #222; }
+  h1 { font-size: 1.5rem; }
+  fieldset { border: 1px solid #ccc; border-radius: 8px; margin: 12px 0; padding: 12px; background: #fff; }
+  legend { font-weight: bold; }
+  input { padding: 8px; margin: 4px 0; width: 100%; box-sizing: border-box; font-size: 1rem; }
+  button { padding: 10px 16px; font-size: 1rem; margin-top: 6px; cursor: pointer; }
+  button:disabled { opacity: .5; }
+  .result { margin-top: 10px; padding: 12px; border-radius: 6px; font-size: 1.1rem; display: none; }
+  .ok { display: block; background: #e6f6e6; border: 2px solid #2e8b2e; }
+  .fail { display: block; background: #fdeaea; border: 2px solid #c62828; color: #b71c1c; }
+  .fail b.big { font-size: 1.8rem; }
+  .info { display: block; background: #eef3fb; border: 1px solid #99b; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { border: 1px solid #ccc; padding: 6px; text-align: left; }
+  #status { padding: 8px; background: #fff3cd; border-radius: 6px; }
+</style>
+</head>
+<body>
+<h1>📚 도서관 대출 시스템</h1>
+<p>책: B001 · B002 · B003 · B004 · B005 | 대출 기간 14일 | 날짜는 '며칠째'(1 이상 정수)</p>
+<div id="status">파이썬 불러오는 중… (처음엔 10~20초 걸릴 수 있습니다)</div>
+
+<fieldset>
+  <legend>대출</legend>
+  <input id="b-book" placeholder="책 번호 (예: B001)">
+  <input id="b-name" placeholder="이름 (예: 김민수)">
+  <input id="b-day" placeholder="며칠째 (예: 1)">
+  <button id="b-btn" disabled>대출하기</button>
+  <div id="b-res" class="result"></div>
+</fieldset>
+
+<fieldset>
+  <legend>반납</legend>
+  <input id="r-book" placeholder="책 번호 (예: B001)">
+  <input id="r-name" placeholder="이름 (예: 김민수)">
+  <input id="r-day" placeholder="며칠째 (예: 10)">
+  <button id="r-btn" disabled>반납하기</button>
+  <div id="r-res" class="result"></div>
+</fieldset>
+
+<fieldset>
+  <legend>대출 목록</legend>
+  <input id="l-name" placeholder="이름 (예: 김민수)">
+  <button id="l-btn" disabled>대출 목록 보기</button>
+  <div id="l-res" class="result"></div>
+</fieldset>
+
+<button id="reset-btn" disabled>처음 상태로 초기화</button>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let py;
+
+function show(id, cls, html) { const el = $(id); el.className = "result " + cls; el.innerHTML = html; }
+
+async function main() {
+  try {
+    py = await loadPyodide();
+    const code = await (await fetch("solution.py?v=" + Date.now())).text();
+    py.FS.writeFile("solution.py", code);
+    py.runPython(`
+import sys
+sys.path.insert(0, ".")
+from solution import LibraryLoan
+lib = LibraryLoan()
+
+def parse_day(text):
+    # 입력을 숫자로 바꿔서 그대로 넘긴다. 맞는 날짜인지는 solution.py가 판단한다.
+    text = text.strip()
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+def day_hint(text):
+    d = parse_day(text)
+    if not isinstance(d, int):
+        return "날짜는 정수로 입력하세요. (예: 1, 2, 3 …)"
+    if d < 1:
+        return "날짜는 1 이상이어야 합니다."
+    return ""
+
+def do_borrow(book, name, day):
+    return lib.borrow(book.strip(), name.strip(), parse_day(day))
+
+def do_return(book, name, day):
+    return lib.return_book(book.strip(), name.strip(), parse_day(day))
+
+def do_loans(name):
+    return [list(x) for x in lib.get_loans(name.strip())]
+
+def reset():
+    global lib
+    lib = LibraryLoan()
+`);
+    for (const b of ["b-btn", "r-btn", "l-btn", "reset-btn"]) $(b).disabled = false;
+    $("status").textContent = "준비 완료 ✓ (solution.py 사용 중)";
+  } catch (e) {
+    $("status").textContent = "불러오기 실패: " + e;
+  }
+}
+
+function failHtml(msg, dayText) {
+  const hint = py.globals.get("day_hint")(dayText);
+  return `<b class="big">❌ 실패</b><br>${msg}` + (hint ? `<br><br>입력 확인: ${esc(hint)}` : "");
+}
+
+$("b-btn").onclick = () => {
+  const book = $("b-book").value, name = $("b-name").value, day = $("b-day").value;
+  const ok = py.globals.get("do_borrow")(book, name, day);
+  if (ok) {
+    const loans = py.globals.get("do_loans")(name).toJs();
+    const due = (loans.find((x) => x[0] === book.trim()) || [])[1];
+    show("b-res", "ok", `<b>✅ 대출 성공</b><br>${esc(name)}님이 ${esc(book)}을(를) 빌렸습니다. 반납 기한: ${due}일째`);
+  } else {
+    show("b-res", "fail", failHtml("대출이 거절되었습니다. (없는 책 · 잘못된 날짜 · 이미 대출 중 · 3권 초과 · 연체 중 · 대출 정지)", day));
+  }
+};
+
+$("r-btn").onclick = () => {
+  const book = $("r-book").value, name = $("r-name").value, day = $("r-day").value;
+  const late = py.globals.get("do_return")(book, name, day);
+  if (late === -1) {
+    show("r-res", "fail", failHtml("반납이 거절되었습니다. (본인이 빌린 책이 아님 · 이미 반납함 · 잘못된 날짜 · 빌린 날보다 이른 날짜)", day));
+  } else {
+    show("r-res", "ok", `<b>✅ 반납 성공</b><br>연체 일수: <b>${late}일</b>`);
+  }
+};
+
+$("l-btn").onclick = () => {
+  const name = $("l-name").value;
+  const loans = py.globals.get("do_loans")(name).toJs();
+  if (loans.length === 0) {
+    show("l-res", "info", `${esc(name)}님이 빌린 책이 없습니다.`);
+  } else {
+    const rows = loans.map(([b, due]) => `<tr><td>${esc(b)}</td><td>${due}일째까지</td></tr>`).join("");
+    show("l-res", "info", `<table><tr><th>책 번호</th><th>반납 기한</th></tr>${rows}</table>`);
+  }
+};
+
+$("reset-btn").onclick = () => {
+  py.globals.get("reset")();
+  for (const r of ["b-res", "r-res", "l-res"]) $(r).className = "result";
+  alert("처음 상태로 초기화했습니다.");
+};
+
+main();
+</script>
+</body>
+</html>
